@@ -341,21 +341,42 @@ def save_session(drv):
         print("[session] luu loi:", e)
 
 
+def _ext_popup_url():
+    return f"chrome-extension://{EXT_ID}/index.html"
+
+
 def login(drv):
     drv.execute_cdp_cmd("Network.enable", {})
     load_cookies(drv)
     inject_local_storage_early(drv)
-    drv.get(GRASS_URL)
-    st = wait_state(drv)
-    print("[login] page_state =", st)
-    if st == "logged_in":
+    # 1) Thu mo trang web (de app tu refresh token); SPA nang -> renderer co the OOM
+    try:
+        drv.get(GRASS_URL)
+        st = wait_state(drv, 20)
+        print("[login] page_state =", st)
+        if st == "logged_in":
+            save_session(drv)
+            STATE["page_state"] = "logged_in"
+            return True
+    except Exception as e:
+        print("[login] web tab crash (SPA qua nang voi 512MB) -> dung popup extension:", str(e)[:80])
+    # 2) Fallback nhe: mo popup cua extension - service worker van chay voi cookie trong profile
+    try:
+        drv.get(_ext_popup_url())
+        time.sleep(5)
+        st = page_state(drv)
+        print("[login] popup extension mo OK, state =", st, "| url =", drv.current_url[:70])
+        if st == "login_form":
+            print("[login] EXTENSION CHUA DANG NHAP -> cookie het han! Cap nhat COOKIES_URL roi restart.")
+            STATE["page_state"] = "ext_not_logged_in"
+            return False
+        STATE["page_state"] = "ext_popup"
         save_session(drv)
         return True
-    if st == "guest":
-        print("[login] cookie/localStorage het han hoac khong duoc chap nhan -> node se chet. "
-              "Cap nhat COOKIES_URL/STORAGE_URL (env) roi restart service.")
-    STATE["page_state"] = st
-    return False
+    except Exception as e:
+        print("[login] khong mo duoc popup extension:", str(e)[:120])
+        STATE["page_state"] = "ext_popup_fail"
+        return False
 
 
 # ---------- 6) VONG LAP CHINH ----------
@@ -387,7 +408,6 @@ def node_loop():
                 if not login(driver):
                     print("[loop] login chua thanh cong - thu vong sau")
                 else:
-                    STATE["page_state"] = "logged_in"
                     time.sleep(5)
                     try:
                         ts = driver.execute_cdp_cmd("Target.getTargets", {})["targetInfos"]
@@ -396,17 +416,27 @@ def node_loop():
                             print("   [ext]", t["type"], t["url"][:90])
                     except Exception:
                         pass
+                # moi 6 vong (~30 phut): ghe web 1 lan de app refresh accessToken
+                if i % 6 == 0:
+                    print("[loop] ghe web refresh token...")
+                    try:
+                        driver.get(GRASS_URL)
+                        st = wait_state(driver, 20)
+                        print("[loop] web:", st)
+                        if st == "logged_in":
+                            save_session(driver)
+                    except Exception as e:
+                        print("[loop] web crash (bo qua):", str(e)[:60])
+                    try:
+                        driver.get(_ext_popup_url())
+                    except Exception:
+                        pass
                 # refresh giu phien
                 time.sleep(SLEEP_SECONDS)
                 try:
                     driver.refresh()
-                    st = wait_state(driver)
-                    print("[loop] sau refresh:", st)
-                    if st == "logged_in":
-                        save_session(driver)
-                        STATE["page_state"] = "logged_in"
-                    elif st in ("guest", "login_form", "captcha"):
-                        STATE["page_state"] = st
+                    time.sleep(3)
+                    print("[loop] da refresh trang hien tai")
                 except Exception as e:
                     print("[loop] refresh loi, tao lai driver:", e)
                     try:
