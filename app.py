@@ -51,7 +51,10 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
         else:
             self.send_response(404)
             self.end_headers()
@@ -232,7 +235,9 @@ def create_driver():
               # hanh trang cho may 512MB: giam so process renderer, chan OOM kill tab
               "--renderer-process-limit=1", "--process-per-site",
               "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows",
-              "--disable-hang-monitor", "--disable-features=Translate"]:
+              "--disable-hang-monitor", "--disable-features=Translate",
+              "--disable-background-networking", "--disable-component-update",
+              "--disable-sync", "--metrics-recording-only"]:
         o.add_argument(a)
     if os.path.isdir(EXT_DIR):
         o.add_argument(f"--disable-extensions-except={EXT_DIR}")
@@ -350,23 +355,29 @@ def login(drv):
     load_cookies(drv)
     inject_local_storage_early(drv)
     # 1) Thu mo trang web (de app tu refresh token); SPA nang -> renderer co the OOM
+    st = "crash"
     try:
         drv.get(GRASS_URL)
-        st = wait_state(drv, 20)
+        st = wait_state(drv, 35)
         print("[login] page_state =", st)
         if st == "logged_in":
             save_session(drv)
             STATE["page_state"] = "logged_in"
-            return True
     except Exception as e:
-        print("[login] web tab crash (SPA qua nang voi 512MB) -> dung popup extension:", str(e)[:80])
-    # 2) Fallback nhe: mo popup cua extension - service worker van chay voi cookie trong profile
+        print("[login] web tab crash (SPA qua nang voi 512MB):", str(e)[:80])
+    # 2) Giai phong RAM: dua tab ve about:blank TRUOC khi mo popup (512MB)
+    try:
+        drv.get("about:blank")
+        time.sleep(2)
+    except Exception:
+        pass
+    # 3) Mo popup cua extension - nhe hon SPA nhieu; service worker chay voi cookie trong profile
     try:
         drv.get(_ext_popup_url())
-        time.sleep(5)
-        st = page_state(drv)
-        print("[login] popup extension mo OK, state =", st, "| url =", drv.current_url[:70])
-        if st == "login_form":
+        time.sleep(6)
+        st2 = page_state(drv)
+        print("[login] popup extension mo OK, state =", st2, "| url =", drv.current_url[:70])
+        if st2 == "login_form":
             print("[login] EXTENSION CHUA DANG NHAP -> cookie het han! Cap nhat COOKIES_URL roi restart.")
             STATE["page_state"] = "ext_not_logged_in"
             return False
@@ -406,7 +417,13 @@ def node_loop():
                     STATE["status"] = "running"
                     STATE["detail"] = "chrome up"
                 if not login(driver):
-                    print("[loop] login chua thanh cong - thu vong sau")
+                    print("[loop] login chua thanh cong - tai lai driver moi")
+                    try:
+                        driver.quit()
+                    except Exception:
+                        pass
+                    driver = None
+                    time.sleep(10)
                 else:
                     time.sleep(5)
                     try:
@@ -428,6 +445,8 @@ def node_loop():
                     except Exception as e:
                         print("[loop] web crash (bo qua):", str(e)[:60])
                     try:
+                        driver.get("about:blank")
+                        time.sleep(2)
                         driver.get(_ext_popup_url())
                     except Exception:
                         pass
