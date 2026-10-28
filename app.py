@@ -161,15 +161,22 @@ def fetch_extension(ext_id=EXT_ID, dest=EXT_DIR):
 
 
 # ---------- 4) CHROME / SELENIUM ----------
-CHROME_BIN = None
-DRIVER_BIN = None
-for _root, _dirs, _files in os.walk("/opt/chrome-for-testing"):
-    for _f in _files:
-        p = os.path.join(_root, _f)
-        if _f == "chrome" and os.access(p, os.X_OK):
-            CHROME_BIN = p
-        if _f == "chromedriver" and os.access(p, os.X_OK):
-            DRIVER_BIN = p
+# Uu tien env (SnapDeploy chay ARM64 -> chromium tu apt la dung arch),
+# roi fallback sang Chrome for Testing trong /opt.
+CHROME_BIN = os.environ.get("CHROME_BIN")
+DRIVER_BIN = os.environ.get("DRIVER_BIN")
+if not CHROME_BIN or not DRIVER_BIN:
+    for _root, _dirs, _files in os.walk("/opt/chrome-for-testing"):
+        for _f in _files:
+            p = os.path.join(_root, _f)
+            if _f == "chrome" and os.access(p, os.X_OK):
+                CHROME_BIN = p
+            if _f == "chromedriver" and os.access(p, os.X_OK):
+                DRIVER_BIN = p
+if not CHROME_BIN:
+    CHROME_BIN = "/usr/bin/chromium" if os.path.exists("/usr/bin/chromium") else None
+if not DRIVER_BIN:
+    DRIVER_BIN = "/usr/bin/chromedriver" if os.path.exists("/usr/bin/chromedriver") else None
 print(f"[chrome] bin={CHROME_BIN} driver={DRIVER_BIN}")
 
 from selenium import webdriver  # noqa: E402
