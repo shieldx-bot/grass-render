@@ -226,9 +226,13 @@ def create_driver():
     o = Options()
     o.add_argument("--headless=new")  # new headless van chay duoc extension
     for a in ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--use-gl=swiftshader",
-              "--window-size=1280,800", "--disable-blink-features=AutomationControlled",
+              "--window-size=1024,700", "--disable-blink-features=AutomationControlled",
               "--no-first-run", "--no-default-browser-check", "--disable-plugins",
-              "--mute-audio", f"--user-data-dir={_profile_dir()}"]:
+              "--mute-audio", f"--user-data-dir={_profile_dir()}",
+              # hanh trang cho may 512MB: giam so process renderer, chan OOM kill tab
+              "--renderer-process-limit=1", "--process-per-site",
+              "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows",
+              "--disable-hang-monitor", "--disable-features=Translate"]:
         o.add_argument(a)
     if os.path.isdir(EXT_DIR):
         o.add_argument(f"--disable-extensions-except={EXT_DIR}")
